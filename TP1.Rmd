@@ -1,0 +1,198 @@
+---
+title: "TP1"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r}
+library(MASS)
+library(tidyverse)
+library(car)
+library(ggplot2)
+```
+
+## Datos - Pregunta 1
+
+Cargamos los datos, que son separados por espacio
+
+```{r}
+datos <- read.csv("data.csv", sep = "", header = TRUE)
+summary(datos$age)
+# Filtramos los valores de edad mayor a 100. Hicimos esto porque habia datos con edades ridiculamente grandes, no sabemos si se estanc argando mal los datos o si realmente es ese el valor.
+datos_filtrados = datos %>%
+  filter(age <= 75)
+summary(datos_filtrados$age)
+
+set.seed(123)  # Para reproducibilidad
+
+n <- nrow(datos_filtrados)
+indices <- sample(1:n, size = 0.7 * n)  # 70% para entrenamiento
+
+entrenamiento <- datos_filtrados[indices, ]
+testeo <- datos_filtrados[-indices, ]
+
+```
+
+
+## Pregunta 2
+Elegimos la pregunta Q41: I have thought about dying my hair
+
+## Pregunta 3
+El problema de usar una regresión lineal es que si bien las respuestas son números, no representan sus valores numéricos. El problema de la multinomial es que la distancia entre los numeros no es la misma para cada par de números.
+
+## Pregunta 4
+Salteamos pregunta regresion ordinal. VOLVER!
+
+## Pregunta 5
+Filtramos las filas que tienen un 0 como respuesta a Q41
+```{r}
+entrenamientoQ41 = entrenamiento %>%
+  filter(Q41>0)
+
+testeoQ41 = testeo %>%
+  filter(Q41>0)
+```
+
+Graficamos la proporcion de respuestas en funcion de la edad
+```{r}
+datos_prop <- entrenamientoQ41 %>%
+  group_by(age, Q41) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(age) %>%
+  mutate(proporcion = n / sum(n))
+
+ggplot(datos_prop, aes(x = age, y = proporcion, color = factor(Q41))) +
+  geom_line(linewidth = 0.5) +
+  labs(x = "Edad", y = "Proporción de respuesta", color = "Respuesta Q41") +
+  theme_minimal()
+
+```
+
+```{r}
+ggplot(datos_filtrados, aes(x = age)) +
+  geom_histogram(binwidth = 10, fill = "steelblue", color = "white") +
+  labs(x = "Edad", y = "Cantidad de individuos") +
+  theme_minimal()
+## Cambiando el valor de bandwidth podemos definir de a cuantos años agrupar
+```
+
+```{r}
+# Función para contar individuos por edad o por grupo de edades
+contar_individuos_por_edad <- function(data, bin_width = 1, right = FALSE) {
+  # Crear los cortes de edad (bins)
+  breaks <- seq(
+    floor(min(data$age, na.rm = TRUE)),
+    ceiling(max(data$age, na.rm = TRUE)) + bin_width,
+    by = bin_width
+  )
+  
+  # Agrupar por edad o rango de edades
+  data %>%
+    mutate(
+      age_group = cut(
+        age,
+        breaks = breaks,
+        include.lowest = TRUE,
+        right = right
+      )
+    ) %>%
+    count(age_group, name = "cantidad_individuos") %>%
+    arrange(age_group)
+}
+
+tabla_por_edad <- contar_individuos_por_edad(datos_filtrados, bin_width = 1)
+print(tabla_por_edad)
+tabla_por_tramos_5 <- contar_individuos_por_edad(datos_filtrados, bin_width = 5)
+print(tabla_por_tramos_5)
+tabla_por_tramos_10 <- contar_individuos_por_edad(datos_filtrados, bin_width = 10)
+print(tabla_por_tramos_10)
+
+```
+
+
+```{r}
+entrenamientoQ41$Q41 <- as.factor(entrenamientoQ41$Q41)
+entrenamientoQ41$Q41 <- ordered(entrenamientoQ41$Q41, levels = c("1", "2", "3", "4", "5"))
+modelo_ordinal_Q41 <- polr(Q41 ~ age, data = entrenamientoQ41, Hess = TRUE)
+summary(modelo_ordinal_Q41)
+Anova(modelo_ordinal_Q41)
+```
+
+## Pregunta 6
+Ahora hacemos lo mismo para la pregunta 9
+
+```{r}
+entrenamientoQ9 = entrenamiento %>%
+  filter(Q9>0)
+testeoQ9 = testeo %>%
+  filter(Q9>0)
+entrenamientoQ9$Q9 <- as.factor(entrenamientoQ9$Q9)
+entrenamientoQ9$Q9 <- ordered(entrenamientoQ9$Q9, levels = c("1", "2", "3", "4", "5"))
+modelo_ordinal_Q9 <- polr(Q9 ~ age, data = entrenamientoQ9, Hess = TRUE)
+summary(modelo_ordinal_Q9)
+```
+
+
+
+Y ahora aplicamos el modelo para estimar la probabilidad de que a alguien de 25 años le gusten las armas
+```{r}
+persona_25 <- data.frame(age = 25)
+probabilidades <- predict(modelo_ordinal_Q9, newdata = persona_25, type = "probs")
+print(probabilidades)
+
+```
+
+Y la probabilidad de que esté por lo menos de acuerdo es sumar la probabilidad de que elija 4 y que elija 5
+```{r}
+proba_de_acuerdo <- as.numeric(probabilidades[4]+probabilidades[5])
+proba_de_acuerdo
+```
+
+## Pregunta 7
+Definimos la funcion de perdida
+```{r}
+#tabla modelo va a ser una tabla con valor esperado | valor predicho
+loss_fn <- function(tabla_modelo){
+  total <- 0
+  n <- nrow(tabla_modelo)
+  for (i in 1:n) {
+    total <- total + abs(tabla_modelo[i,1]-tabla_modelo[i,2])
+  }
+  return(total/n)
+}
+```
+
+## Pregunta 8
+Implementamos un modelo lineal que prediga la pregunta Q en funcion de la edad
+```{r}
+entrenamientoQ41$Q41num <- as.numeric(entrenamientoQ41$Q41)
+modelo_lineal_Q41 <- lm(Q41num ~ age, data = entrenamientoQ41)
+summary(modelo_lineal_Q41)
+```
+
+Hacemos las predicciones con los datos de testeo para ambos modelos
+```{r}
+predicciones_lineal <- as.numeric(predict(modelo_lineal_Q41, newdata = testeoQ41, type = "response"))
+predicciones_ordinal <- as.numeric(predict(modelo_ordinal_Q41, newdata = testeoQ41, type = "class"))
+
+predicciones_Q41 <- data.frame(
+  esperado = as.numeric(testeoQ41$Q41),
+  pred_lineal = round(predicciones_lineal),
+  pred_ordinal = predicciones_ordinal
+)
+```
+
+IMPORTANTE: Nos esta pasando que la edad no es un buen predictor en ninguno de los modelos entonces las predicciones dan todas lo mismo en el ordinal y solo dan dos valores posibles en el lineal. Estaría bueno probar con otras preguntas a ver si encontramos alguna en la que la edad sea mejor predictor --> ahora que cortamos en 75 años ya no está dando tan mal
+
+## Pregunta 9
+
+```{r}
+predicciones_Q41_lineal <- predicciones_Q41 %>%
+  select(esperado, pred_lineal)
+predicciones_Q41_ordinal <- predicciones_Q41 %>%
+  select(esperado, pred_ordinal)
+perdida_lineal <- loss_fn(predicciones_Q41_lineal)
+perdida_ordinal <- loss_fn(predicciones_Q41_ordinal)
+```
+
+
