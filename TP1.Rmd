@@ -1,7 +1,10 @@
 ---
-title: "TP1"
-output: html_document
+title: "Trabajo Práctico 1"
+output:
+  html_document: default
+  pdf_document: default
 date: "`r Sys.Date()`"
+
 ---
 
 ```{r, results='hide', message=FALSE, warning=FALSE}
@@ -9,16 +12,18 @@ library(MASS)
 library(tidyverse)
 library(car)
 library(ggplot2)
+library(rstan)
+library(rstanarm)
 ```
 
 ## Datos - Pregunta 1
 
-Cargamos los datos, que son separados por espacio
-
+Cargamos los datos
+ Filtramos los valores de edad mayor a 100. Hicimos esto porque habia datos con edades ridiculamente grandes. Esto claramente es un error en la toma de datos por lo que decidimos sacarlos.
 ```{r}
 datos <- read.csv("data.csv", sep = "", header = TRUE)
 summary(datos$age)
-# Filtramos los valores de edad mayor a 100. Hicimos esto porque habia datos con edades ridiculamente grandes, no sabemos si se estanc argando mal los datos o si realmente es ese el valor.
+
 datos_filtrados = datos %>%
   filter(age <= 75)
 summary(datos_filtrados$age)
@@ -32,19 +37,19 @@ entrenamiento <- datos_filtrados[indices, ]
 testeo <- datos_filtrados[-indices, ]
 
 ```
-
+ACA CAMBIAR Y AGREGAR FILTRADO POR 75. TAMBIEN HABLAR UN POQUITIN DE LOS RESULTADOS CUANDO PLANTEAMOS LOS MODELOS
 
 ## Pregunta 2
-Elegimos la pregunta Q41: I have thought about dying my hair
+Elegimos la pregunta Q41: "I take stairs two at a time"
 
 ## Pregunta 3
 El problema de usar una regresión lineal es que si bien las respuestas son números, no representan sus valores numéricos. El problema de la multinomial es que la distancia entre los numeros no es la misma para cada par de números.
 
 ## Pregunta 4
-Salteamos pregunta regresion ordinal. VOLVER!
+La regresión ordinal es un modelo utilizado para analizar variables dependientes que toman valores en niveles ordenados, pero donde la distancia entre un nivel y otro no es necesariamente constante. La idea del modelo es estimar la probabilidad de que cada observación (por ejemplo, un individuo) pertenezca a una u otra categoría, respetando el orden natural de estas categorías.
 
 ## Pregunta 5
-Filtramos las filas que tienen un 0 como respuesta a Q41
+Filtramos las filas que tienen un 0 como respuesta a Q41, ya que asumimos que son errores de la toma de datos (los valores deben ser de 1 a 5)
 ```{r}
 entrenamientoQ41 = entrenamiento %>%
   filter(Q41>0)
@@ -53,7 +58,7 @@ testeoQ41 = testeo %>%
   filter(Q41>0)
 ```
 
-Graficamos la proporcion de respuestas en funcion de la edad
+Graficamos la proporcion de respuestas en funcion de la edad, ya que los modelos predicen muy mal en base a la edad con las edades hasta 100 
 ```{r}
 datos_prop <- entrenamientoQ41 %>%
   group_by(age, Q41) %>%
@@ -109,6 +114,7 @@ print(tabla_por_tramos_10)
 
 ```
 
+Planteamos un modelo de regresión ordinal y evaluamos los coeficientes
 
 ```{r}
 entrenamientoQ41$Q41 <- as.factor(entrenamientoQ41$Q41)
@@ -119,7 +125,8 @@ Anova(modelo_ordinal_Q41)
 ```
 
 ## Pregunta 6
-Ahora hacemos lo mismo para la pregunta 9
+Queremos estimar la probabilidad de que una persona de 25 años este al menos de acuerdo con la frase "me gustan las armas" (pregunta 9). Es decir, que su respuesta a la pregunta 9 sea de 4 o 5. 
+Para esto, planteamos un modelo de regresión ordinal con la respuesta a la pregunta 9 en función de la edad.
 
 ```{r}
 entrenamientoQ9 = entrenamiento %>%
@@ -134,7 +141,7 @@ summary(modelo_ordinal_Q9)
 
 
 
-Y ahora aplicamos el modelo para estimar la probabilidad de que a alguien de 25 años le gusten las armas
+Y ahora aplicamos el modelo para estimar las probabilidades de cada respuesta para una persona de 25 años.
 ```{r}
 persona_25 <- data.frame(age = 25)
 probabilidades <- predict(modelo_ordinal_Q9, newdata = persona_25, type = "probs")
@@ -163,7 +170,7 @@ loss_fn <- function(tabla_modelo){
 ```
 
 ## Pregunta 8
-Implementamos un modelo lineal que prediga la pregunta Q en funcion de la edad
+Implementamos un modelo lineal que prediga la respuesta a la pregunta Q41 en funcion de la edad
 ```{r}
 entrenamientoQ41$Q41num <- as.numeric(entrenamientoQ41$Q41)
 modelo_lineal_Q41 <- lm(Q41num ~ age, data = entrenamientoQ41)
@@ -194,5 +201,49 @@ predicciones_Q41_ordinal <- predicciones_Q41 %>%
 perdida_lineal <- loss_fn(predicciones_Q41_lineal)
 perdida_ordinal <- loss_fn(predicciones_Q41_ordinal)
 ```
+
+
+
+##Pregunta 10
+
+```{r}
+
+
+datos <- entrenamiento %>%
+  filter(age <= 75, Q41 > 0) %>%
+  mutate(Q41 = factor(Q41, ordered = TRUE))
+
+
+R2_medias <- seq(0.1, 0.9, length.out = 3) 
+
+posteriors <- list()
+
+for (i in seq_along(R2_medias)) {
+  R2_val <- R2_medias[i]
+  
+  fit <- stan_polr(
+    Q41 ~ age,
+    data = datos,
+    prior = R2(location = R2_val, what = "mean"),
+    prior_counts = dirichlet(1),
+    chains = 2,         
+    iter = 500,         
+    seed = 123
+  )
+  
+  post_beta <- as.data.frame(as.matrix(fit))$age
+  posteriors[[i]] <- data.frame(beta = post_beta, R2_mean = R2_val)
+}
+
+resultados <- bind_rows(posteriors)
+
+ggplot(resultados, aes(x = beta, fill = as.factor(R2_mean))) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Distribución posterior de β según la media de la prior sobre R²",
+       x = "β (pendiente de age)", fill = "Media R²") +
+  theme_minimal()
+
+```
+
 
 
