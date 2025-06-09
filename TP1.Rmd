@@ -19,25 +19,28 @@ library(rstanarm)
 ## Datos - Pregunta 1
 
 Cargamos los datos
- Filtramos los valores de edad mayor a 100. Hicimos esto porque habia datos con edades ridiculamente grandes. Esto claramente es un error en la toma de datos por lo que decidimos sacarlos.
+Filtramos los valores de edad mayor a 100. Hicimos esto porque habia datos con edades ridiculamente grandes. Esto claramente es un error en la toma de datos por lo que decidimos sacarlos.
+Separamos en datos de entrenamiento (70%) y datos de testeo (30%)
 ```{r}
 datos <- read.csv("data.csv", sep = "", header = TRUE)
 summary(datos$age)
+# Observamos que las edades llegan hasta 2.147e+09 lo cual no tiene sentido. Decidimos eliminar los datos correspondientes a edades mayores a 100.
 
-datos_filtrados = datos %>%
-  filter(age <= 75)
-summary(datos_filtrados$age)
+datos_filtrados_100 = datos %>%
+  filter(age <= 100)
+summary(datos_filtrados_100$age)
 
+# Dividimos en datos de entrenamiento y datos de testeo
 set.seed(123)  # Para reproducibilidad
 
-n <- nrow(datos_filtrados)
-indices <- sample(1:n, size = 0.7 * n)  # 70% para entrenamiento
+n_100 <- nrow(datos_filtrados_100)
+indices_100 <- sample(1:n_100, size = 0.7 * n_100)  # 70% para entrenamiento
 
-entrenamiento <- datos_filtrados[indices, ]
-testeo <- datos_filtrados[-indices, ]
+entrenamiento_100 <- datos_filtrados_100[indices_100, ]
+testeo_100 <- datos_filtrados_100[-indices_100, ]
 
 ```
-ACA CAMBIAR Y AGREGAR FILTRADO POR 75. TAMBIEN HABLAR UN POQUITIN DE LOS RESULTADOS CUANDO PLANTEAMOS LOS MODELOS
+
 
 ## Pregunta 2
 Elegimos la pregunta Q41: "I take stairs two at a time"
@@ -50,37 +53,132 @@ La regresión ordinal es un modelo utilizado para analizar variables dependiente
 
 ## Pregunta 5
 Filtramos las filas que tienen un 0 como respuesta a Q41, ya que asumimos que son errores de la toma de datos (los valores deben ser de 1 a 5)
-```{r}
-entrenamientoQ41 = entrenamiento %>%
-  filter(Q41>0)
 
-testeoQ41 = testeo %>%
+Planteamos un modelo de regresión ordinal y evaluamos los coeficientes
+
+```{r}
+entrenamientoQ41_100 = entrenamiento_100 %>%
   filter(Q41>0)
+testeoQ41_100 = testeo_100 %>%
+  filter(Q41>0)
+entrenamientoQ41_100$Q41 <- as.factor(entrenamientoQ41_100$Q41)
+entrenamientoQ41_100$Q41 <- ordered(entrenamientoQ41_100$Q41, levels = c("1", "2", "3", "4", "5"))
+modelo_ordinal_Q41_100 <- polr(Q41 ~ age, data = entrenamientoQ41_100, Hess = TRUE)
+summary(modelo_ordinal_Q41_100)
+Anova(modelo_ordinal_Q41_100)
+```
+Obtenemos un beta para edad de -0.0227 con un p-valor de 2.2e-16. Esto significa que a medida que aumenta la edad la probabilidad de estar de acuerdo con la pregunta baja y que este efecto es significativo.
+
+## Pregunta 6
+Queremos estimar la probabilidad de que una persona de 25 años este al menos de acuerdo con la frase "me gustan las armas" (pregunta 9). Es decir, que su respuesta a la pregunta 9 sea de 4 o 5. 
+Para esto, planteamos un modelo de regresión ordinal con la respuesta a la pregunta 9 en función de la edad.
+
+```{r}
+entrenamientoQ9_100 = entrenamiento_100 %>%
+  filter(Q9>0)
+testeoQ9_100 = testeo_100 %>%
+  filter(Q9>0)
+entrenamientoQ9_100$Q9 <- as.factor(entrenamientoQ9_100$Q9)
+entrenamientoQ9_100$Q9 <- ordered(entrenamientoQ9_100$Q9, levels = c("1", "2", "3", "4", "5"))
+modelo_ordinal_Q9_100 <- polr(Q9 ~ age, data = entrenamientoQ9_100, Hess = TRUE)
+summary(modelo_ordinal_Q9_100)
+Anova(modelo_ordinal_Q9_100)
+```
+Obtenemos un beta para edad de -0.00766 con un p-valor de 2.2e-16. Esto significa que a medida que aumenta la edad la probabilidad de estar de acuerdo con la pregunta baja y que este efecto es significativo.
+
+
+Y ahora aplicamos el modelo para estimar las probabilidades de cada respuesta para una persona de 25 años.
+```{r}
+persona_25 <- data.frame(age = 25)
+probabilidades <- predict(modelo_ordinal_Q9_100, newdata = persona_25, type = "probs")
+print(probabilidades)
+
 ```
 
-Graficamos la proporcion de respuestas en funcion de la edad, ya que los modelos predicen muy mal en base a la edad con las edades hasta 100 
+Y la probabilidad de que esté por lo menos de acuerdo es sumar la probabilidad de que elija 4 y que elija 5
 ```{r}
-datos_prop <- entrenamientoQ41 %>%
+proba_de_acuerdo <- as.numeric(probabilidades[4]+probabilidades[5])
+proba_de_acuerdo
+```
+La probabilidad de que esté al menos de acuerdo con la pregunta 9 es de 0.343507
+
+## Pregunta 7
+Definimos la funcion de perdida
+```{r}
+#tabla modelo va a ser una tabla con valor esperado | valor predicho
+loss_fn <- function(tabla_modelo){
+  total <- 0
+  n <- nrow(tabla_modelo)
+  for (i in 1:n) {
+    total <- total + abs(tabla_modelo[i,1]-tabla_modelo[i,2])
+  }
+  return(total/n)
+}
+```
+
+## Pregunta 8
+Implementamos un modelo lineal que prediga la respuesta a la pregunta Q41 en funcion de la edad
+```{r}
+entrenamientoQ41_100$Q41num <- as.numeric(entrenamientoQ41_100$Q41)
+modelo_lineal_Q41_100 <- lm(Q41num ~ age, data = entrenamientoQ41_100)
+summary(modelo_lineal_Q41_100)
+Anova(modelo_lineal_Q41_100)
+```
+Obtenemos un beta para edad de -0.0182588 con un p-valor de 2.2e-16. Esto significa que a medida que aumenta la edad la probabilidad de estar de acuerdo con la pregunta baja y que este efecto es significativo.
+
+Hacemos las predicciones con los datos de testeo para ambos modelos
+```{r}
+predicciones_lineal_100 <- as.numeric(predict(modelo_lineal_Q41_100, newdata = testeoQ41_100, type = "response"))
+predicciones_ordinal_100 <- as.numeric(predict(modelo_ordinal_Q41_100, newdata = testeoQ41_100, type = "class"))
+
+predicciones_Q41_100 <- data.frame(
+  esperado = as.numeric(testeoQ41_100$Q41),
+  pred_lineal = round(predicciones_lineal_100),
+  pred_ordinal = predicciones_ordinal_100
+)
+```
+
+
+## Pregunta 9
+
+```{r}
+predicciones_Q41_lineal_100 <- predicciones_Q41_100 %>%
+  select(esperado, pred_lineal)
+predicciones_Q41_ordinal_100 <- predicciones_Q41_100 %>%
+  select(esperado, pred_ordinal)
+perdida_lineal_100 <- loss_fn(predicciones_Q41_lineal_100)
+perdida_ordinal_100 <- loss_fn(predicciones_Q41_ordinal_100)
+```
+Al aplicar la funcion de perdida a las predicciones de ambos modelos obtenemos que la perdida para el modelo ordinal es de 1.5683758 mientras que para el lineal es de 1.2384188.
+Por lo tanto si bien no es correcto usar el modelo de regresion lineal porque asume una relacion numerica entre las respuestas 1 a 5, este resulta mejor a la hora de predecir la respuesta en funcion de la edad. 
+
+
+Decidimos analizar los datos para ver la cantidad de respuestas en función de la edad. Para eso graficamos la proporcion de respuesta a Q41 en funcion de la edad.
+```{r}
+datos_prop_100 <- entrenamientoQ41_100 %>%
   group_by(age, Q41) %>%
   summarise(n = n(), .groups = "drop") %>%
   group_by(age) %>%
   mutate(proporcion = n / sum(n))
 
-ggplot(datos_prop, aes(x = age, y = proporcion, color = factor(Q41))) +
+ggplot(datos_prop_100, aes(x = age, y = proporcion, color = factor(Q41))) +
   geom_line(linewidth = 0.5) +
   labs(x = "Edad", y = "Proporción de respuesta", color = "Respuesta Q41") +
   theme_minimal()
 
 ```
-
+Observamos que la proporcion de personas que responden 1 parece aumentar con la edad, mientras que la proporcion de personas que responden 2 a 5 disminuye. Sin embargo, a partir de los 75 años se empiezan a ver proporciones muy altas para todas las respuestas. Creemos que esto se debe a que hay muy pocas personas de cada edad respondiendo, por lo que las proporciones para cada respuesta se vuelven mucho mas altas. 
+Para corroborar esto graficamos la cantidad de respuestas en funcion de la edad
 ```{r}
-ggplot(datos_filtrados, aes(x = age)) +
+ggplot(datos_filtrados_100, aes(x = age)) +
   geom_histogram(binwidth = 10, fill = "steelblue", color = "white") +
   labs(x = "Edad", y = "Cantidad de individuos") +
   theme_minimal()
 ## Cambiando el valor de bandwidth podemos definir de a cuantos años agrupar
 ```
+En este caso observamos que la mayor cantidad de respuestas estan concentradas entre los 13 y los 35 años aproximadamente.
 
+Por ultimo medimos la cantidad de respuestas por edad.
 ```{r}
 # Función para contar individuos por edad o por grupo de edades
 contar_individuos_por_edad <- function(data, bin_width = 1, right = FALSE) {
@@ -105,13 +203,42 @@ contar_individuos_por_edad <- function(data, bin_width = 1, right = FALSE) {
     arrange(age_group)
 }
 
-tabla_por_edad <- contar_individuos_por_edad(datos_filtrados, bin_width = 1)
-print(tabla_por_edad)
-tabla_por_tramos_5 <- contar_individuos_por_edad(datos_filtrados, bin_width = 5)
-print(tabla_por_tramos_5)
-tabla_por_tramos_10 <- contar_individuos_por_edad(datos_filtrados, bin_width = 10)
-print(tabla_por_tramos_10)
+tabla_por_edad <- contar_individuos_por_edad(datos_filtrados_100, bin_width = 1)
+print(tabla_por_edad[50:81,])
+tabla_por_tramos_5 <- contar_individuos_por_edad(datos_filtrados_100, bin_width = 5)
+#print(tabla_por_tramos_5)
+tabla_por_tramos_10 <- contar_individuos_por_edad(datos_filtrados_100, bin_width = 10)
+#print(tabla_por_tramos_10)
 
+```
+Podemos observar que a partir de los 75 años la cantidad de respuestas por edad disminuye mucho. Es por esto que decidimos volver a filtrar los datos y quedarnos solo con los que corresponden a edades de hasta 75 años. 
+
+
+
+```{r}
+datos_filtrados = datos %>%
+  filter(age <= 75)
+summary(datos_filtrados$age)
+
+set.seed(123)  # Para reproducibilidad
+
+n <- nrow(datos_filtrados)
+indices <- sample(1:n, size = 0.7 * n)  # 70% para entrenamiento
+
+entrenamiento <- datos_filtrados[indices, ]
+testeo <- datos_filtrados[-indices, ]
+
+```
+
+
+## Pregunta 5
+Volvemos a eliminar los casos en los que la respuesta para Q41 es 0
+```{r}
+entrenamientoQ41 = entrenamiento %>%
+  filter(Q41>0)
+
+testeoQ41 = testeo %>%
+  filter(Q41>0)
 ```
 
 Planteamos un modelo de regresión ordinal y evaluamos los coeficientes
@@ -123,10 +250,10 @@ modelo_ordinal_Q41 <- polr(Q41 ~ age, data = entrenamientoQ41, Hess = TRUE)
 summary(modelo_ordinal_Q41)
 Anova(modelo_ordinal_Q41)
 ```
+Obtenemos un beta para edad de -0.02306 con un p-valor de 2.2e-16. Esto significa que a medida que aumenta la edad la probabilidad de estar de acuerdo con la pregunta baja y que este efecto es significativo.
 
 ## Pregunta 6
-Queremos estimar la probabilidad de que una persona de 25 años este al menos de acuerdo con la frase "me gustan las armas" (pregunta 9). Es decir, que su respuesta a la pregunta 9 sea de 4 o 5. 
-Para esto, planteamos un modelo de regresión ordinal con la respuesta a la pregunta 9 en función de la edad.
+Repetimos lo que hicimos anteriormente pero esta vez con los datos filtrados hasta 75 años de edad.
 
 ```{r}
 entrenamientoQ9 = entrenamiento %>%
@@ -137,11 +264,11 @@ entrenamientoQ9$Q9 <- as.factor(entrenamientoQ9$Q9)
 entrenamientoQ9$Q9 <- ordered(entrenamientoQ9$Q9, levels = c("1", "2", "3", "4", "5"))
 modelo_ordinal_Q9 <- polr(Q9 ~ age, data = entrenamientoQ9, Hess = TRUE)
 summary(modelo_ordinal_Q9)
+Anova(modelo_ordinal_Q9)
 ```
+Obtenemos un beta para edad de -0.007308 con un p-valor de 2.2e-16. Esto significa que a medida que aumenta la edad la probabilidad de estar de acuerdo con la pregunta baja y que este efecto es significativo.
 
 
-
-Y ahora aplicamos el modelo para estimar las probabilidades de cada respuesta para una persona de 25 años.
 ```{r}
 persona_25 <- data.frame(age = 25)
 probabilidades <- predict(modelo_ordinal_Q9, newdata = persona_25, type = "probs")
@@ -154,28 +281,19 @@ Y la probabilidad de que esté por lo menos de acuerdo es sumar la probabilidad 
 proba_de_acuerdo <- as.numeric(probabilidades[4]+probabilidades[5])
 proba_de_acuerdo
 ```
+La probabilidad de que este por lo menos de acuerdo con la pregunta 9 es de 0.3429158
 
-## Pregunta 7
-Definimos la funcion de perdida
-```{r}
-#tabla modelo va a ser una tabla con valor esperado | valor predicho
-loss_fn <- function(tabla_modelo){
-  total <- 0
-  n <- nrow(tabla_modelo)
-  for (i in 1:n) {
-    total <- total + abs(tabla_modelo[i,1]-tabla_modelo[i,2])
-  }
-  return(total/n)
-}
-```
 
 ## Pregunta 8
-Implementamos un modelo lineal que prediga la respuesta a la pregunta Q41 en funcion de la edad
+Implementamos un modelo lineal que prediga la respuesta a la pregunta Q41 en funcion de la edad con los datos filtrados para edades de hasta 75 años
 ```{r}
 entrenamientoQ41$Q41num <- as.numeric(entrenamientoQ41$Q41)
 modelo_lineal_Q41 <- lm(Q41num ~ age, data = entrenamientoQ41)
 summary(modelo_lineal_Q41)
+Anova(modelo_lineal_Q41)
 ```
+Obtenemos un beta para edad de -0.0185272 con un p-valor de 2.2e-16. Esto significa que a medida que aumenta la edad la probabilidad de estar de acuerdo con la pregunta baja y que este efecto es significativo.
+
 
 Hacemos las predicciones con los datos de testeo para ambos modelos
 ```{r}
@@ -188,8 +306,7 @@ predicciones_Q41 <- data.frame(
   pred_ordinal = predicciones_ordinal
 )
 ```
-
-IMPORTANTE: Nos esta pasando que la edad no es un buen predictor en ninguno de los modelos entonces las predicciones dan todas lo mismo en el ordinal y solo dan dos valores posibles en el lineal. Estaría bueno probar con otras preguntas a ver si encontramos alguna en la que la edad sea mejor predictor --> ahora que cortamos en 75 años ya no está dando tan mal
+Observamos
 
 ## Pregunta 9
 
@@ -201,8 +318,10 @@ predicciones_Q41_ordinal <- predicciones_Q41 %>%
 perdida_lineal <- loss_fn(predicciones_Q41_lineal)
 perdida_ordinal <- loss_fn(predicciones_Q41_ordinal)
 ```
+Al aplicar la funcion de perdida a las predicciones de ambos modelos obtenemos que la perdida para el modelo ordinal es de 1.5625944 mientras que para el lineal es de 1.2363734.
+Por lo tanto si bien no es correcto usar el modelo de regresion lineal porque asume una relacion numerica entre las respuestas 1 a 5, este nuevamente resulta mejor a la hora de predecir la respuesta en funcion de la edad. 
 
-
+Con respecto a los valores obtenidos anteriormente (antes de filtrar las edades mayores a 75), observamos que las diferencais son minimas. Ene ste sentido, eliminar datos de edades mayores a 75 no pareceria haber modificado la capacidad de prediccion de los modelos de manera significativa.
 
 ##Pregunta 10
 
@@ -212,7 +331,7 @@ perdida_ordinal <- loss_fn(predicciones_Q41_ordinal)
 datos <- entrenamiento %>%
   filter(age <= 75, Q41 > 0) %>%
   mutate(Q41 = factor(Q41, ordered = TRUE))
-
+# me parece que esto no hace falta y que se puede usar entrenamiento_Q41 directamente
 
 R2_medias <- seq(0.1, 0.9, length.out = 3) 
 
@@ -245,5 +364,40 @@ ggplot(resultados, aes(x = beta, fill = as.factor(R2_mean))) +
 
 ```
 
+```{r}
+datos <- entrenamiento %>%
+  filter(age <= 75, Q41 > 0) %>%
+  mutate(Q41 = factor(Q41, ordered = TRUE))
+# me parece que esto no hace falta y que se puede usar entrenamientoQ41 directamente
 
+R2_medias_v2 <- seq(0.1, 0.9, length.out = 9) 
+
+posteriors_v2 <- list()
+
+for (i in seq_along(R2_medias_v2)) {
+  R2_val <- R2_medias_v2[i]
+  
+  fit <- stan_polr(
+    Q41 ~ age,
+    data = entrenamientoQ41,
+    prior = R2(location = R2_val, what = "mean"),
+    prior_counts = dirichlet(1),
+    chains = 2,         
+    iter = 100,         
+    seed = 123
+  )
+  
+  post_beta_v2 <- as.data.frame(as.matrix(fit))$age
+  posteriors_v2[[i]] <- data.frame(beta = post_beta_v2, R2_mean = R2_val)
+}
+
+resultados_v2 <- bind_rows(posteriors_v2)
+
+ggplot(resultados_v2, aes(x = beta, fill = as.factor(R2_mean))) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Distribución posterior de β según la media de la prior sobre R²",
+       x = "β (pendiente de age)", fill = "Media R²") +
+  theme_minimal()
+
+```
 
